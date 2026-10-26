@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; worker-src 'none'; connect-src 'none'; style-src 'unsafe-inline'">
+  <title>纯 JS 种子搜索性能评估</title>
+</head>
+<body>
+  <h1>纯 JS 主线程分块搜索</h1>
+  <p>禁止 Worker、网络请求及 WASM；运行中可操作下面的输入框。</p>
+  <input placeholder="输入测试响应">
+  <button id="start">运行基准</button>
+  <button id="cancel">取消</button>
+  <pre id="output">尚未运行</pre>
+  <script type="module" src="./browser.mjs"></script>
+</body>
+</html>
