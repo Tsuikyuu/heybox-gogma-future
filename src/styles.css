@@ -237,12 +237,12 @@ progress::-webkit-progress-bar { background: var(--secondary); border-radius: 4p
 progress::-webkit-progress-value { background: var(--primary); border-radius: 4px; transition: width .15s linear; }
 progress::-moz-progress-bar { background: var(--primary); }
 #search-progress b { font: 20px var(--mono); color: var(--foreground); }
-details { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; color: var(--muted-foreground); font-size: 12px; cursor: pointer; list-style: none; }
+details { margin-top: 16px; border-top: 1px solid var(--border); }
+summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 10px; color: var(--muted-foreground); font-size: 12px; cursor: pointer; list-style: none; }
 summary::-webkit-details-marker { display: none; }
-.search-history > summary, .filters-card > summary { min-height: 0; }
 summary::after { content: "+"; color: var(--muted-foreground); font: 18px var(--mono); transition: transform .2s; }
 summary:active { color: var(--foreground); }
+details:not([open]) > summary { padding-bottom: 10px; }
 details[open] > summary { margin-bottom: 12px; }
 details[open] > summary::after { transform: rotate(45deg); }
 code { color: var(--foreground); font: 12px var(--mono); overflow-wrap: anywhere; }
