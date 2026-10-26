@@ -10,23 +10,27 @@
   },
   "heybox": {
     "miniProgramId": "",
-    "name": "我的小程序",
-    "category": "other",
+    "name": "巨戟观星",
+    "desc": "怪物猎人：荒野巨戟武器完全重抽观星助手，支持连续样本识别、种子续接、未来加成筛选和兑现进度记录。",
+    "category": "tool",
     "icon": "assets/heybox-placeholder.png",
     "coverImages": ["assets/heybox-placeholder.png"],
-    "platforms": ["android", "ios", "ohos", "windows", "macos"],
-    "permissions": {}
+    "platforms": ["android", "ios", "ohos"],
+    "permissions": { "storage": { "enabled": true } }
   },
   "scripts": {
     "hb-sdk": "hb-sdk",
     "dev": "hb-sdk dev",
+    "dev:web": "VITE_STANDALONE=1 vite --host 127.0.0.1",
+    "check": "bun run typecheck",
     "typecheck": "tsc --noEmit",
     "build": "bun run typecheck && hb-sdk build",
     "doctor": "hb-sdk doctor",
     "deploy": "hb-sdk remote deploy"
   },
   "dependencies": {
-    "@heybox/hb-sdk": "^0.9.3"
+    "@heybox/hb-sdk": "^0.9.3",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "22.20.5",
