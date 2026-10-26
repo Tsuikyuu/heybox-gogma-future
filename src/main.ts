@@ -1,12 +1,14 @@
 import './styles.css';
 import { z } from 'zod';
-import { ALGORITHM, attributes, bonuses, compile, compileRequirements, pool, predict, weapons } from './engine';
-import { advance, align, archiveSchema, canUndoCount, deleteProfile, emptyArchive, encodeCode, makeTask, newProfile, parseCode, profileSchema, restoreCheckpoint, saveCheckpoint, setCounter, uint, undoCount, useCandidate, verifySample } from './model';
+import { ALGORITHM, attributes, bonuses, compile, compileRequirements, pool, predict, predictSkills, weapons } from './engine';
+import { advance, align, archiveSchema, canUndoCount, deleteProfile, emptyArchive, encodeCode, makeTask, newProfile, parseCode, profileSchema, restoreCheckpoint, saveCheckpoint, setCounter, setSkillCounter, uint, undoCount, useCandidate, verifySample } from './model';
 import type { Archive, Position, Profile, Task } from './model';
 import { runSearch, searchProgress } from './search';
 import { openStorage, standalone } from './storage';
 import { mountSelectors } from './selector';
 import { shortestRoute } from './planner';
+import { skillGroups, skillSets } from './skills';
+import { alignSkillCounter, editSkillObservation, recordSkillSample, searchSkillCounter, selectSkillCandidate, startSkillSampling, verifySkillSample } from './model';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 let archive = emptyArchive();
@@ -19,6 +21,7 @@ let busy = false;
 let searching = false;
 let stop = false;
 let editSample: number | null = null;
+let editSkillSample: number | null = null;
 let preview: Position | null = null;
 let exportText = '';
 let renderedView = '';
@@ -26,6 +29,9 @@ let messageTimer: ReturnType<typeof setTimeout> | undefined;
 const predictionDrafts = new Map<string, { weapon: number; attribute: number; name: string; edited: boolean }>();
 const logPages = new Map<string, number>();
 let prediction: { weapon: number; attribute: number; name: string; rows: { counter: number; roll: number[] }[]; limit: number; page: number; requirements: number[] } | null = null;
+let predictionTrack = 'bonus';
+let observeTrack = 'bonus';
+let skillPrediction: { profile: string; seed: number; start: number; weapon: number; attribute: number; set: number; group: number; count: number; page: number; rows: (ReturnType<typeof predictSkills>[number] & { counter: number })[] } | null = null;
 
 const escape = (value: unknown) => String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const button = (label: string, action: string, value = '', style = '') => `<button type="button" class="${style}${action === 'target' && label === '已加入' ? ' is-saved' : ''}" data-action="${action}" data-value="${escape(value)}"${action === 'tab' && value === tab ? ' aria-current="page"' : ''}>${label}</button>`;
@@ -68,7 +74,7 @@ function slots(p: Profile, sample?: number[]) {
 
 function entryView() {
   if (entry === 'manage') return archiveManager();
-  if (entry === 'about') return `<section class="card"><div class="section-heading"><h2>关于</h2>${button('返回', 'about-back', '', 'small')}</div>${standalone ? '<p class="preview-label"><i aria-hidden="true"></i>开发预览</p>' : ''}<p>怪物猎人：荒野 · 巨戟武器完全重抽辅助</p><p>算法参考 GogmaSeedFinder / WiseHorror GARP<br>${ALGORITHM}</p><p>本版尚待小黑盒真机验收。技能与 Keep 预测后续提供。</p></section>`;
+  if (entry === 'about') return `<section class="card"><div class="section-heading"><h2>关于</h2>${button('返回', 'about-back', '', 'small')}</div>${standalone ? '<p class="preview-label"><i aria-hidden="true"></i>开发预览</p>' : ''}<p>怪物猎人：荒野 · 巨戟武器完全重抽辅助</p><p>算法参考 GogmaSeedFinder / WiseHorror GARP<br>${ALGORITHM}</p><p>本版尚待小黑盒真机验收。技能预测已对照上游公式向量，尚未独立实机验证；Keep 预测后续提供。</p></section>`;
   if (entry === 'import') return `<section class="card"><div class="section-heading"><h2>导入档案</h2>${button('返回', 'home', '', 'small')}</div>
     <form data-form="preview"><label>续接码<textarea name="code" placeholder="GSF2-B…-G…-S…" required></textarea></label>${submit('解析并预览')}</form>
     ${preview ? `<div class="notice">种子 <b>${preview.seed}</b> · 下一次复原位置 <b>${preview.counter}</b> · 技能位置 ${preview.skill ?? '未知'}</div>
@@ -78,14 +84,26 @@ function entryView() {
   return `<section class="card"><div class="section-heading"><h2>新建档案</h2>${current() ? button('返回', 'home', '', 'small') : ''}</div><p>先手动保存游戏，再连续完全重抽，按从左到右的顺序记录五槽。</p><form data-form="new"><div class="grid">${field('档案名称', 'name', '我的第一次观星', 'text', 'required maxlength="80"')}${field('平台', 'platform', '', 'text', 'placeholder="例如 PC / PS5" maxlength="40"')}${field('游戏版本', 'gameVersion', '', 'text', 'placeholder="不知道可留空" maxlength="40"')}</div>${check('saved', '我已在采样前保存游戏，能够回到这个基线')}${submit('开始记录')}</form></section>`;
 }
 
-function gateView(p: Profile) {
-  if (p.gate) return '';
-  return `<section class="card gate-card"><h3>完全重抽</h3><details><summary>适用条件</summary><p>仅支持复原 counter gate 已启用（≥ 0x23）的 Reset。这不等于已抽 35 次；工具尚不能自动检测门控状态。若不确定，请从同一基线重抽、回档重放，再用额外样本核对。</p></details><form data-form="gate">${check('gate', '按已启用抽取位置的假设使用完全重抽，并用额外样本核对')}${submit('确认')}</form></section>`;
+function observe(p: Profile) {
+  const tracks = `<div class="actions prediction-tracks" role="group" aria-label="观星类型">${button('复原加成', 'observe-track', 'bonus', observeTrack === 'bonus' ? 'primary' : '')}${button('技能组合', 'observe-track', 'skill', observeTrack === 'skill' ? 'primary' : '')}</div>`;
+  return tracks + (observeTrack === 'skill' ? skillObserveView(p) : bonusObserveView(p));
 }
 
-function observe(p: Profile) {
+function skillObserveView(p: Profile) {
+  if (!p.state) return `<section class="card empty"><h2>尚未确定共同种子</h2><p>请先通过复原加成采样识别种子，或导入续接码。</p>${button('前往复原观星', 'observe-track', 'bonus', 'primary')}</section>`;
+  const s = p.skillSession?.seed === p.state.seed ? p.skillSession : null;
+  return `<div class="section-heading"><h2>技能观星</h2></div>
+    <section class="card state-card"><h3>种子 ${p.state.seed}</h3><p>下一次技能位置 <b>${p.state.skill ?? '未知'}</b> · 复原位置 ${p.state.counter}</p><p>${s?.verified ? '✓ 已校准' : '待额外样本校准'} · ${s?.synced || p.state.skill !== null ? '位置已确认' : '位置待确认'}</p>
+    ${s?.candidate !== null && s?.candidate !== undefined ? `<p>采样第一抽位置 <b>${s.candidate}</b></p>` : ''}
+    ${s?.verified && !s.synced ? `<form data-form="skill-align"><label>现在的游戏位置<select name="mode"><option value="baseline">我已回到技能采样前基线</option><option value="sampled">我没有回档，仍在全部 ${s.rolls.length} 抽样本之后</option></select></label><p>回档后下一位置为 ${s.candidate}，未回档为 ${s.candidate! + s.rolls.length}。若回档也改变了复原进度，请核对复原位置。</p>${check('aligned', '我已核对游戏实际位置；工具不会代我回档')}${submit('确认位置，进入执行准备')}</form>` : ''}
+    <details><summary>手动设置已知技能位置</summary><form data-form="skill-position">${number('下一次技能位置', 'skill', p.state.skill === null ? '' : String(p.state.skill))}${submit('保存技能位置')}</form><p class="muted">未知位置不能当作 0。可从 GSF2 导入，或使用下方连续技能采样定位。技能重置、首次巨戟升级各推进一次技能位置。</p></details>
+    ${p.state.skill !== null ? button('查看技能预测', 'skill-prediction', '', 'primary') : ''}</section>
+    ${skillSamplingView(p)}`;
+}
+
+function bonusObserveView(p: Profile) {
   const latest = p.tasks.at(-1);
-  return `<div class="section-heading"><h2>${p.state ? '观星' : '采样'}</h2></div>${gateView(p)}
+  return `<div class="section-heading"><h2>${p.state ? '观星' : '采样'}</h2></div>
     ${!p.rolls.length && !p.aligned ? `<section class="card"><h3>采样武器</h3><form data-form="sampling-weapon"><div class="grid">${select('武器种类', 'weapon', weapons, p.sampling.weapon)}${select('属性 / 异常', 'attribute', attributes, p.sampling.attribute)}</div>${submit('设置采样武器')}</form></section>` : ''}
     ${p.state ? `<section class="card state-card"><h3>种子 ${p.state.seed}</h3><p>下一次复原位置 <b>${p.state.counter}</b> · 技能位置 ${p.state.skill ?? '未知'}</p><p>${p.calibrated ? '✓ 已校准' : '待额外样本校准'} · ${p.aligned ? '位置已确认' : '位置待确认'}</p>${button('查看预测', 'tab', 'predict', 'primary')}
       ${!p.aligned ? `<form data-form="align"><label>现在的游戏位置<select name="mode"><option value="baseline">我已回到采样前基线 / 导入码对应的位置</option><option value="sampled">我没有回档，仍在全部已录样本之后</option><option value="current">已核对与当前工具位置 ${p.state.counter} 一致</option></select></label>${check('aligned', '我已核对游戏实际位置；工具不会代我回档')}${submit('确认位置，进入执行准备')}</form>` : ''}</section>` : ''}
@@ -103,7 +121,7 @@ function searchView(t: Task, p: Profile) {
     <div class="actions">${searching ? button('暂停并保存进度', 'pause', '', 'primary') : t.status === 'paused' && matching ? button('继续搜索', 'resume', '', 'primary') : ''}${!searching && t.status === 'paused' ? button('取消此任务', 'cancel-search') : ''}</div>
     ${!matching ? '<p class="notice">观测已更新，此任务保留为历史结果。请用当前样本建立新搜索。</p>' : ''}
     ${t.status === 'overflow' ? '<p class="notice">候选过多，已停止。请补充连续样本或缩小范围后重新搜索。</p>' : ''}
-    ${t.status === 'complete' && !t.candidates.length ? '<p class="notice">本范围内零候选。检查槽位、武器属性、连续性、门控假设与范围，再修正或扩展。</p>' : ''}
+    ${t.status === 'complete' && !t.candidates.length ? '<p class="notice">本范围内零候选。检查槽位、武器属性、连续性与范围，再修正或扩展。</p>' : ''}
     ${t.status === 'complete' && t.candidates.length > 1 ? '<p class="notice">有多个候选，建议追加连续样本，再以相同范围重新搜索。</p>' : ''}
     ${t.status === 'complete' && t.candidates.length === 1 ? '<p class="notice">本次范围内唯一，不代表所有范围内唯一。选用后请额外一抽核对。</p>' : ''}
     ${!searching ? t.candidates.slice(0, 30).map((c, i) => `<div class="candidate"><span>种子 <b>${c.seed}</b> / 起始位置 <b>${c.counter}</b></span>${t.status === 'complete' && matching && !p.aligned ? button('选用并校准', 'candidate', String(i), 'small') : '<span class="muted">待完成 / 历史候选</span>'}</div>`).join('') : ''}
@@ -123,7 +141,40 @@ function archiveManager() {
 }
 
 function predictView(p: Profile) {
-  if (!p.state || !p.gate) return `<section class="card empty"><h2>尚未确认抽取位置</h2>${button('前往观星', 'tab', 'observe', 'primary')}</section>`;
+  const tracks = `<div class="actions prediction-tracks" role="group" aria-label="预测类型">${button('复原加成', 'prediction-track', 'bonus', predictionTrack === 'bonus' ? 'primary' : '')}${button('技能组合', 'prediction-track', 'skill', predictionTrack === 'skill' ? 'primary' : '')}</div>`;
+  return tracks + (predictionTrack === 'skill' ? skillPredictView(p) : bonusPredictView(p));
+}
+
+function skillPredictView(p: Profile) {
+  if (!p.state || p.state.skill === null) return `<section class="card empty"><h2>尚未确认技能位置</h2><p>请到技能观星中确定种子并定位技能计数器。</p>${button('前往技能观星', 'skill-observe', '', 'primary')}</section>`;
+  const result = skillPrediction?.profile === p.id && skillPrediction.seed === p.state.seed && skillPrediction.start === p.state.skill ? skillPrediction : null;
+  return `<div class="section-heading"><h2>未来技能组合</h2></div>
+    <p class="notice">技能预测使用独立技能位置。已对照上游 GARP 0.9.3 公式向量，尚未独立实机验证。</p>
+    <section class="card"><h3>下一次技能位置 <span class="position">${p.state.skill}</span></h3>${button('核对或更新技能位置', 'skill-observe', '', 'small')}</section>
+    <details class="card filters-card" ${result ? '' : 'open'}><summary>筛选技能组合</summary><form data-form="skill-predict"><div class="grid">${select('武器种类', 'weapon', weapons, result?.weapon ?? 0)}${select('属性 / 异常', 'attribute', attributes, result?.attribute ?? 0)}${select('系列技能', 'set', ['不限', ...skillSets], (result?.set ?? -1) + 1)}${select('组合技能', 'group', ['不限', ...skillGroups], (result?.group ?? -1) + 1)}</div><p class="muted">系列技能和组合技能可分别选择不限。</p>${number('向后预测次数', 'count', String(result?.count ?? 1000), 10000)}${submit('生成技能预测')}</form></details>
+    ${result ? `<section class="card"><h3>${weapons[result.weapon]} · ${attributes[result.attribute]}</h3><p>${result.rows.length} 条匹配 / ${result.count} 抽</p>${result.rows.length ? result.rows.slice(result.page * 30, (result.page + 1) * 30).map((r) => `<article class="future-row skill-row"><div><h3>再抽 ${r.counter - result.start + 1} 次</h3><small>技能位置 ${r.counter} · 先垫 ${r.counter - result.start} 次</small></div><div class="skill-pair"><p><small>系列技能</small><br><b>${escape(skillSets[r.set])}</b></p><p><small>组合技能</small><br><b>${escape(skillGroups[r.group])}</b></p></div></article>`).join('') : '<p class="empty">没有匹配结果，试试调整条件或范围。</p>'}<div class="actions">${result.page > 0 ? button('上一页', 'skill-page', '-1') : ''}${(result.page + 1) * 30 < result.rows.length ? button('下一页', 'skill-page', '1') : ''}<span class="muted">${result.page + 1} / ${Math.max(1, Math.ceil(result.rows.length / 30))}</span></div></section>` : ''}`;
+}
+
+function skillSampleFields(sample?: number) {
+  return `<div class="grid">${select('系列技能', 'set', ['请选择', ...skillSets], sample === undefined ? 0 : Math.floor(sample / 14) + 1)}${select('组合技能', 'group', ['请选择', ...skillGroups], sample === undefined ? 0 : sample % 14 + 1)}</div>`;
+}
+
+function skillSamplingView(p: Profile) {
+  const s = p.skillSession?.seed === p.state?.seed ? p.skillSession : null;
+  const fixed = s?.synced || (p.state?.skill !== null && p.state?.skill !== undefined);
+  const setup = `<form data-form="skill-sampling"><div class="grid">${select('武器种类', 'weapon', weapons, s?.weapon ?? 0)}${select('属性 / 异常', 'attribute', attributes, s?.attribute ?? 0)}</div>${check('saved', '我已在采样前保存游戏，能够回到这个基线')}${submit('设置采样武器')}</form>`;
+  return `${!fixed && (!s || !s.rolls.length) ? `<section class="card"><h3>采样武器</h3><p>先保存游戏，再连续重置技能。已有武器上的旧技能不能作为下一抽样本。</p>${setup}</section>` : ''}
+    ${s && !s.synced ? `<section class="card sample-card${s.rolls.length ? '' : ' solo'}"><h3>${editSkillSample === null ? `录入第 ${s.rolls.length + 1} 抽` : `修改第 ${editSkillSample + 1} 抽`}</h3><p>${weapons[s.weapon]} · ${attributes[s.attribute]} · 连续记录，至少两抽，建议四抽以上。</p>${!s.verified || editSkillSample !== null ? `<form data-form="skill-sample">${skillSampleFields(editSkillSample === null ? undefined : s.rolls[editSkillSample])}<div class="actions">${submit(editSkillSample === null ? '保存这一抽' : '保存修改')}${editSkillSample !== null ? button('取消修改', 'skill-edit-cancel') : ''}</div></form>` : '<p>✓ 额外一抽已核对，请在上方确认游戏位置。</p>'}
+    ${s.candidate !== null && !s.verified && editSkillSample === null ? `<details><summary>用新抽取的额外一抽验证候选</summary><p>以下一抽须紧接已录的 ${s.rolls.length} 抽之后，不能重复填写旧结果。验证成功会追加这条样本。</p><form data-form="skill-verify">${skillSampleFields()}${submit('核对额外一抽')}</form></details>` : ''}</section>` : ''}
+    ${fixed ? '<p class="notice">已进入正式位置。新一轮采样请建立新档案，避免混入当前执行记录。</p>' : ''}
+    ${s?.rolls.length ? `<section class="card records-card${s.synced ? ' solo' : ''}"><h3>观测记录 <span class="count">${s.rolls.length}</span></h3><div class="records-list">${s.rolls.map((id, i) => `<article class="sample"><b>${String(i + 1).padStart(2, '0')}</b><div class="chips"><span class="bonus">${escape(skillSets[Math.floor(id / 14)])}</span><span class="bonus">${escape(skillGroups[id % 14])}</span></div>${!s.synced ? button('修改', 'skill-edit', String(i), 'small') : ''}</article>`).join('')}</div>${!s.synced ? button('删除最后一抽', 'skill-delete-sample', '', 'small text-button') : ''}</section>` : ''}
+    ${s && !s.synced && !s.verified ? `<section class="card"><h3>搜索技能位置</h3><p>共同种子 ${s.seed}</p><form data-form="skill-search"><div class="grid">${number('起始位置下界', 'start', String(s.search?.start ?? 0))}${number('起始位置上界', 'end', String(s.search?.end ?? 9999))}</div>${submit('开始搜索')}</form><details><summary>位置怎么填？</summary><p>填写采样第一抽的绝对技能 counter；已知位置时上下界相同。单次最多搜索 10,000 个位置，可调整范围后重搜。</p></details></section>` : ''}
+    ${s?.search ? `<section class="card"><h3>最近搜索任务</h3><p>种子 ${s.seed} · 位置 ${s.search.start}–${s.search.end}</p><p><b>范围完成</b> · ${s.search.candidates.length} 个候选</p>${s.verified ? '<p class="notice">✓ 已通过额外一抽校准。</p>' : !s.search.candidates.length ? '<p class="notice">本范围内零候选。请检查技能对、武器属性、连续性与范围。</p>' : s.search.candidates.length > 1 ? '<p class="notice">有多个候选，建议追加连续样本，再以相同范围重新搜索。</p>' : '<p class="notice">本次范围内唯一，不代表所有范围内唯一。选用后请额外一抽核对。</p>'}${s.search.candidates.slice(0, 30).map((counter) => `<div class="candidate"><span>种子 <b>${s.seed}</b> / 起始位置 <b>${counter}</b></span>${!s.verified && !s.synced ? button(s.candidate === counter ? '已选用' : '选用并校准', 'skill-candidate', String(counter), 'small') : '<span class="muted">历史候选</span>'}</div>`).join('')}${s.search.candidates.length > 30 ? '<p>仅展示前 30 个候选，请补充样本缩小范围。</p>' : ''}</section>` : ''}
+    `;
+}
+
+function bonusPredictView(p: Profile) {
+  if (!p.state) return `<section class="card empty"><h2>尚未确认抽取位置</h2>${button('前往观星', 'tab', 'observe', 'primary')}</section>`;
   const draft = predictionDrafts.get(p.id) ?? { weapon: 0, attribute: 0, name: predictionName(0, 0), edited: false };
   predictionDrafts.set(p.id, draft);
   const rows = prediction?.rows.slice(prediction.page * 30, (prediction.page + 1) * 30) ?? [];
@@ -139,7 +190,7 @@ function predictionName(weapon: number, attribute: number) {
 
 function demandPlanView(p: Profile) {
   const pending = p.demands.filter((d) => !d.achieved);
-  const route = p.state && p.gate && pending.length ? shortestRoute(p.state, pending) : null;
+  const route = p.state && pending.length ? shortestRoute(p.state, pending) : null;
   return `<section class="card"><h3>已保存需求 <span class="count">${p.demands.length}</span></h3>${p.demands.length ? p.demands.map((d) => `<article class="future-row"><div><b>${escape(d.name)}</b><p>${weapons[d.weapon]} · ${attributes[d.attribute]} · ${d.achieved ? '已获得' : '待获得'}</p></div>${d.requirements.some(Boolean) ? chips(d.requirements.filter(Boolean)) : '<p class="chips muted">加成不限</p>'}${button('删除', 'remove-demand', d.id, 'small')}</article>`).join('') : '<p>在预测筛选中设置加成并保存需求，每条需求对应一把武器。</p>'}</section>
     ${p.demands.length ? `<section class="card"><h3>最短强化路径</h3>${!pending.length ? '<p>全部需求已获得。</p>' : !route ? '<p>先在观星页确认种子与抽取位置。</p>' : !route.complete ? `<p class="notice">向后搜索 ${route.searched} 次，未找到满足全部需求的路线。可放宽需求后重试。</p>` : `<p>从位置 ${p.state!.counter} 起，共 ${route.total} 次完全重抽，其中 ${route.total - pending.length} 次垫刀。每条需求获得一把武器。</p>${!p.aligned || !p.calibrated ? '<p class="notice">路线预览：执行前请核对样本与游戏位置。</p>' : ''}<ol class="route-list">${route.steps.map((step) => `<li>${step.padding ? `<p>先垫刀 <b>${step.padding}</b> 次</p>` : ''}<b>${escape(step.demand.name)}</b><p>${weapons[step.demand.weapon]} · ${attributes[step.demand.attribute]} · 位置 ${step.counter}<br>完全重抽 1 次，核对并保留</p>${chips(step.roll)}</li>`).join('')}</ol><p class="muted">按总强化次数最少计算，最多搜索 10,000 次；同一位置仅用于一把武器。垫刀使用其他武器，已获得的武器不再重抽。</p>${button('用此路线替换执行目标', 'apply-route', '', 'primary')}`}</section>` : ''}`;
 }
@@ -209,7 +260,7 @@ async function startSearch() {
 async function addProfile(p: Profile) {
   if (archive.profiles.length >= 30) throw new Error('最多保存 30 个档案，请先导出整理');
   await commit({ ...archive, profiles: [...archive.profiles, p], active: p.id });
-  entry = ''; tab = 'observe'; prediction = null; preview = null; editSample = null;
+  entry = ''; tab = 'observe'; prediction = null; preview = null; editSample = null; editSkillSample = null;
 }
 
 async function handleForm(form: HTMLFormElement, intent?: string) {
@@ -250,8 +301,46 @@ async function handleForm(form: HTMLFormElement, intent?: string) {
     entry = ''; prediction = null; render(); return;
   }
   if (!p) throw new Error('请先建立档案');
+  if (type === 'skill-sampling') {
+    if (!data.has('saved')) throw new Error('请确认技能采样前已保存游戏');
+    await update(startSkillSampling(p, { weapon: num('weapon'), attribute: num('attribute') }));
+    editSkillSample = null;
+    skillPrediction = null;
+    exportText = '';
+  }
+  if (type === 'skill-sample' || type === 'skill-verify') {
+    const set = uint.min(1).max(skillSets.length).parse(num('set')) - 1;
+    const group = uint.min(1).max(skillGroups.length).parse(num('group')) - 1;
+    await update(type === 'skill-verify' ? verifySkillSample(p, set * 14 + group) : editSkillSample === null ? recordSkillSample(p, set * 14 + group) : editSkillObservation(p, editSkillSample, set * 14 + group));
+    editSkillSample = null;
+  }
+  if (type === 'skill-search') await update(searchSkillCounter(p, num('start'), num('end')));
+  if (type === 'skill-align') {
+    if (!data.has('aligned')) throw new Error('请确认游戏实际位置');
+    await update(alignSkillCounter(p, z.enum(['baseline', 'sampled']).parse(text('mode')) === 'sampled'));
+    skillPrediction = null;
+    exportText = '';
+  }
+  if (type === 'skill-position') {
+    await update(setSkillCounter(p, num('skill')));
+    editSkillSample = null;
+    skillPrediction = null;
+    exportText = '';
+  }
+  if (type === 'skill-predict') {
+    if (!p.state || p.state.skill === null) throw new Error('请先确定技能位置');
+    const input = z.object({
+      weapon: uint.max(13), attribute: uint.max(9),
+      set: uint.max(skillSets.length), group: uint.max(skillGroups.length), count: uint.min(1).max(10000),
+    }).parse({ weapon: num('weapon'), attribute: num('attribute'), set: num('set'), group: num('group'), count: num('count') });
+    if (p.state.skill + input.count > 0xffffffff) throw new Error('预测范围不可超出技能位置上限');
+    skillPrediction = { ...input, set: input.set - 1, group: input.group - 1, profile: p.id, seed: p.state.seed, start: p.state.skill, page: 0,
+      rows: predictSkills(p.state.seed, input.weapon, input.attribute, p.state.skill, input.count)
+        .map((roll, i) => ({ ...roll, counter: p.state!.skill! + i }))
+        .filter((roll) => (!input.set || roll.set === input.set - 1) && (!input.group || roll.group === input.group - 1)),
+    };
+  }
   if (type === 'sampling-weapon') await update(profileSchema.parse({ ...p, sampling: { weapon: num('weapon'), attribute: num('attribute') }, calibrated: false }));
-  if (type === 'gate') await update({ ...p, gate: true });
   if (type === 'sample' || type === 'verify') {
     const sample = Array.from({ length: 5 }, (_, i) => num(`slot${i}`));
     compile(p.sampling.weapon, p.sampling.attribute, [sample]);
@@ -263,7 +352,6 @@ async function handleForm(form: HTMLFormElement, intent?: string) {
     }
   }
   if (type === 'align') {
-    if (!p.gate) throw new Error('请先确认算法适用假设');
     await update(text('mode') === 'current' ? { ...p, aligned: true } : align(p, text('mode') === 'sampled'));
   }
   if (type === 'search') {
@@ -273,7 +361,7 @@ async function handleForm(form: HTMLFormElement, intent?: string) {
     await startSearch(); return;
   }
   if (type === 'predict') {
-    if (!p.state || !p.gate) throw new Error('先取得种子、位置并确认适用假设');
+    if (!p.state) throw new Error('请先取得种子与位置');
     const count = num('count');
     if (count < 1 || count > 10000 || p.state.counter + count > 0xffffffff) throw new Error('预测范围为 1–10,000 抽，且不可超出位置上限');
     const weapon = num('weapon'); const attribute = num('attribute');
@@ -295,7 +383,7 @@ async function handleForm(form: HTMLFormElement, intent?: string) {
   }
   if (type === 'checkpoint') await update(saveCheckpoint(p));
   if (type === 'restore') { await update(restoreCheckpoint(p)); prediction = null; }
-  render(); message(type === 'predict' ? '' : '工具记录已保存');
+  render(); message(type === 'predict' || type === 'skill-predict' ? '' : '工具记录已保存');
 }
 
 async function handleAction(action: string, value: string) {
@@ -306,6 +394,15 @@ async function handleAction(action: string, value: string) {
   if (action === 'about-back') entry = aboutReturn;
   if (action === 'entry') { entry = value; preview = null; exportText = ''; }
   if (action === 'tab') { tab = value; entry = ''; }
+  if (action === 'prediction-track') predictionTrack = value;
+  if (action === 'observe-track') observeTrack = value;
+  if (action === 'skill-observe') { tab = 'observe'; observeTrack = 'skill'; entry = ''; }
+  if (action === 'skill-prediction') { tab = 'predict'; predictionTrack = 'skill'; entry = ''; }
+  if (action === 'skill-edit') editSkillSample = Number(value);
+  if (action === 'skill-edit-cancel') editSkillSample = null;
+  if (p && action === 'skill-delete-sample') { await update(recordSkillSample(p, null)); editSkillSample = null; }
+  if (p && action === 'skill-candidate') { await update(selectSkillCandidate(p, uint.parse(Number(value)))); editSkillSample = null; }
+  if (action === 'skill-page' && skillPrediction) skillPrediction.page = Math.max(0, Math.min(skillPrediction.page + Number(value), Math.ceil(skillPrediction.rows.length / 30) - 1));
   if (action === 'export') exportText = JSON.stringify(archive, null, 2);
   if (action === 'confirm-delete-profile') deletingProfile = value;
   if (action === 'cancel-delete-profile') deletingProfile = '';
@@ -313,7 +410,7 @@ async function handleAction(action: string, value: string) {
     await commit(deleteProfile(archive, value));
     predictionDrafts.delete(value);
     logPages.delete(value);
-    deletingProfile = ''; prediction = null; preview = null; editSample = null; exportText = '';
+    deletingProfile = ''; prediction = null; preview = null; editSample = null; editSkillSample = null; exportText = '';
     if (!archive.profiles.length) entry = 'new';
   }
   if (action === 'export-close') exportText = '';
@@ -344,7 +441,7 @@ async function handleAction(action: string, value: string) {
   if (p && action === 'undo-count') { await update(undoCount(p)); prediction = null; }
   if (p && action === 'remove-demand') await update({ ...p, demands: p.demands.filter((d) => d.id !== value), targets: p.targets.filter((t) => t.demandId !== value) });
   if (p && action === 'apply-route') {
-    if (!p.state || !p.gate) throw new Error('请先确认种子与抽取位置');
+    if (!p.state) throw new Error('请先确认种子与抽取位置');
     const route = shortestRoute(p.state, p.demands.filter((d) => !d.achieved));
     if (!route.complete || !route.steps.length) throw new Error('没有可执行的完整路线');
     await update(profileSchema.parse({ ...p, targets: route.steps.map((step) => ({ id: crypto.randomUUID(), demandId: step.demand.id, name: step.demand.name, weapon: step.demand.weapon, attribute: step.demand.attribute, counter: step.counter, roll: step.roll })) }));
@@ -394,7 +491,7 @@ app.addEventListener('change', (event) => {
   }
   if (!(event.target instanceof HTMLSelectElement) || event.target.id !== 'profile-select') return;
   const id = event.target.value;
-  void perform(async () => { await commit({ ...archive, active: id }); entry = ''; prediction = null; editSample = null; exportText = ''; render(); });
+  void perform(async () => { await commit({ ...archive, active: id }); entry = ''; prediction = null; editSample = null; editSkillSample = null; exportText = ''; render(); });
 });
 app.addEventListener('focusin', (event) => {
   if (event.target instanceof HTMLTextAreaElement || (event.target instanceof HTMLInputElement && event.target.type !== 'checkbox')) {

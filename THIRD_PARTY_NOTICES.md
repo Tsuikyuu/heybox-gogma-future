@@ -1,6 +1,6 @@
 # Third-party notices
 
-`src/engine.ts` is adapted from the Reset implementation of
+`src/engine.ts` and `src/skills.ts` are adapted from the Reset and skill implementations of
 [GogmaSeedFinder](https://github.com/apeshinzo78/GogmaSeedFinder), commit
 `65789e9aa17e434a7f5d74d18ab1f9e1365920eb`, via this repository's validated
 `experiments/gogma-js` prototype. Its MIT license is retained at
@@ -11,3 +11,6 @@ Original algorithm research credits WiseHorror's **Gogma Artian Roll Planner
 [third-party notices](https://github.com/apeshinzo78/GogmaSeedFinder/blob/65789e9aa17e434a7f5d74d18ab1f9e1365920eb/THIRD_PARTY_NOTICES.md)
 for attribution and redistribution conditions, including Nexus Donation Points
 restrictions. No game images or GARP source files are included here.
+
+`tests/skills.test.mjs` retains the 40 skill lottery indices from the upstream
+`tests/fixtures/skill_stream_v0.9.3.json` formula vectors at the same commit.

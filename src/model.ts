@@ -1,11 +1,22 @@
 import { z } from 'zod';
-import { ALGORITHM, compile, compileRequirements, predict } from './engine';
+import { ALGORITHM, compile, compileRequirements, predict, predictSkills } from './engine';
 
 export const uint = z.number().int().min(0).max(0xffffffff);
 const weapon = z.number().int().min(0).max(13);
 const attribute = z.number().int().min(0).max(9);
 const roll = z.array(z.number().int()).length(5);
 const position = z.object({ seed: uint, counter: uint, skill: uint.nullable() });
+const skillSession = z.object({
+  seed: uint, weapon, attribute, rolls: z.array(uint.max(293)).max(100),
+  search: z.object({ start: uint, end: uint, candidates: z.array(uint).max(10000) }).nullable(),
+  candidate: uint.nullable(), verified: z.boolean(), synced: z.boolean(),
+}).superRefine((s, ctx) => {
+  if (s.search && (s.search.end < s.search.start || s.search.end - s.search.start >= 10000 ||
+    s.search.candidates.some((c) => c < s.search!.start || c > s.search!.end))) ctx.addIssue({ code: 'custom', message: '技能搜索范围无效' });
+  if (((s.verified || s.synced) && s.candidate === null) || (s.synced && !s.verified) || (s.verified && s.rolls.length < 3)) ctx.addIssue({ code: 'custom', message: '技能校准状态无效' });
+  if (s.candidate !== null && (!s.search?.candidates.includes(s.candidate) || s.rolls.length < 2 || s.candidate + s.rolls.length > 0xffffffff ||
+    !predictSkills(s.seed, s.weapon, s.attribute, s.candidate, s.rolls.length).every((r, i) => r.tableIndex === s.rolls[i]))) ctx.addIssue({ code: 'custom', message: '技能候选与样本不符' });
+});
 const target = z.object({ id: z.string(), name: z.string().min(1).max(80), weapon, attribute, counter: uint, roll, demandId: z.string().optional() });
 const demand = z.object({ id: z.string(), name: z.string().min(1).max(80), weapon, attribute, requirements: z.array(uint).length(5), achieved: z.boolean().default(false) });
 const task = z.object({
@@ -33,7 +44,10 @@ export const profileSchema = z.object({
   weapon: weapon.optional(), attribute: attribute.optional(),
   rolls: z.array(roll).max(100),
   state: position.nullable(), seedHint: uint.nullable(), skillHint: uint.nullable().default(null),
-  calibrated: z.boolean(), aligned: z.boolean(), gate: z.boolean(),
+  // Legacy flags retained for archive compatibility; no longer user prerequisites.
+  calibrated: z.boolean(), aligned: z.boolean(), gate: z.boolean().default(false),
+  skillGate: z.boolean().default(false),
+  skillSession: skillSession.nullable().default(null),
   baseline: position.nullable(),
   checkpoint: z.object({ position, at: z.string(), achieved: z.array(z.string()).default([]) }).nullable(),
   targets: z.array(target).max(200),
@@ -53,7 +67,7 @@ export const profileSchema = z.object({
   } catch (error) {
     ctx.addIssue({ code: 'custom', message: error instanceof Error ? error.message : '五槽数据无效' });
   }
-  if (p.aligned && (!p.state || !p.gate)) ctx.addIssue({ code: 'custom', message: '执行位置或门控确认缺失' });
+  if (p.aligned && !p.state) ctx.addIssue({ code: 'custom', message: '执行位置缺失' });
   if (new Set(p.demands.map((d) => d.id)).size !== p.demands.length) ctx.addIssue({ code: 'custom', message: '需求标识重复' });
   if (p.targets.some((t) => !p.state || t.counter < 0 || !predict(p.state.seed, t.weapon, t.attribute, t.counter, 1)[0]!.every((id, i) => id === t.roll[i]))) {
     ctx.addIssue({ code: 'custom', message: '目标与种子预测不符' });
@@ -85,6 +99,74 @@ export function setCounter(p: Profile, counter: number): Profile {
   };
 }
 
+export function setSkillCounter(p: Profile, counter: number): Profile {
+  if (!p.state) throw new Error('请先确定种子与位置');
+  return { ...p, state: { ...p.state, skill: uint.parse(counter) }, skillSession: null };
+}
+
+export function startSkillSampling(p: Profile, input: { weapon: number; attribute: number }): Profile {
+  if (!p.state) throw new Error('请先确定共同种子');
+  if (p.state.skill !== null || p.skillSession?.synced) throw new Error('技能位置已确认，新一轮采样请建立新档案');
+  if (p.skillSession?.seed === p.state.seed && p.skillSession.rolls.length) throw new Error('已有技能样本，不能重新设置采样武器');
+  return { ...p, state: { ...p.state, skill: null }, skillHint: null,
+    skillSession: skillSession.parse({ ...input, seed: p.state.seed, rolls: [], search: null, candidate: null, verified: false, synced: false }) };
+}
+
+export function recordSkillSample(p: Profile, sample: number | null): Profile {
+  const session = requireSkillSession(p);
+  if (session.synced) throw new Error('本轮位置已同步，请建立新一轮采样');
+  const rolls = sample === null ? session.rolls.slice(0, -1) : [...session.rolls, uint.max(293).parse(sample)];
+  if (rolls.length > 99) throw new Error('最多录入 99 抽，请预留一抽用于额外核对');
+  return { ...p, skillSession: { ...session, rolls, search: null, candidate: null, verified: false } };
+}
+
+export function editSkillObservation(p: Profile, index: number, sample: number): Profile {
+  const session = requireSkillSession(p);
+  if (session.synced) throw new Error('本轮位置已同步，请建立新一轮采样');
+  if (!Number.isInteger(index) || index < 0 || index >= session.rolls.length) throw new Error('技能样本不存在');
+  const id = uint.max(293).parse(sample);
+  return { ...p, skillSession: { ...session, rolls: session.rolls.map((roll, i) => i === index ? id : roll), search: null, candidate: null, verified: false } };
+}
+
+export function searchSkillCounter(p: Profile, start: number, end: number): Profile {
+  const session = requireSkillSession(p);
+  if (session.synced) throw new Error('请建立新一轮技能采样');
+  if (session.rolls.length < 2) throw new Error('至少录入两抽连续完整技能对，建议四抽以上');
+  uint.parse(start); uint.parse(end);
+  if (end < start || end - start >= 10000 || end + session.rolls.length > 0xffffffff) throw new Error('单次搜索最多 10,000 个技能位置，且不可超出位置上限');
+  const rolls = predictSkills(session.seed, session.weapon, session.attribute, start, end - start + session.rolls.length);
+  const candidates = rolls.slice(0, end - start + 1).flatMap((_, i) => session.rolls.every((id, n) => rolls[i + n]!.tableIndex === id) ? [start + i] : []);
+  return { ...p, skillSession: { ...session, search: { start, end, candidates }, candidate: null, verified: false } };
+}
+
+export function selectSkillCandidate(p: Profile, counter: number): Profile {
+  const session = requireSkillSession(p);
+  if (session.synced || !session.search?.candidates.includes(counter)) throw new Error('请选择当前搜索中的技能候选');
+  return { ...p, skillSession: { ...session, candidate: counter, verified: false } };
+}
+
+export function verifySkillSample(p: Profile, sample: number): Profile {
+  const session = requireSkillSession(p);
+  if (session.candidate === null || session.verified || session.synced) throw new Error('请先选择待核对的技能候选');
+  if (session.rolls.length >= 100) throw new Error('本轮样本已满，请重新采样');
+  const counter = uint.parse(session.candidate + session.rolls.length);
+  uint.parse(counter + 1);
+  if (predictSkills(session.seed, session.weapon, session.attribute, counter, 1)[0]!.tableIndex !== uint.max(293).parse(sample)) throw new Error('额外技能对与预测不一致，请检查样本、武器属性及是否漏抽');
+  return { ...p, skillSession: { ...session, rolls: [...session.rolls, sample], verified: true } };
+}
+
+export function alignSkillCounter(p: Profile, sampled: boolean): Profile {
+  const session = requireSkillSession(p);
+  if (session.candidate === null || !session.verified || session.synced) throw new Error('请先用额外技能对核对候选');
+  const skill = uint.parse(session.candidate + (sampled ? session.rolls.length : 0));
+  return { ...p, state: { ...p.state!, skill }, skillHint: skill, skillSession: { ...session, synced: true } };
+}
+
+function requireSkillSession(p: Profile) {
+  if (!p.state || !p.skillSession || p.skillSession.seed !== p.state.seed) throw new Error('请为当前种子建立技能采样');
+  return p.skillSession;
+}
+
 export function newProfile(name: string, weapon = 0, attribute = 0): Profile {
   return profileSchema.parse({
     id: crypto.randomUUID(), name, sampling: { weapon, attribute }, platform: '未填写', gameVersion: '未知', algorithm: ALGORITHM,
@@ -107,7 +189,6 @@ export function encodeCode(p: Position) {
 }
 
 export function makeTask(p: Profile, input: { seedStart: number; seedEnd: number; counterStart: number; counterEnd: number }): Task {
-  if (!p.gate) throw new Error('请先确认本轮满足启用抽取位置的适用条件');
   if (p.rolls.length < 2) throw new Error('至少录入两抽完整连续样本，建议六抽');
   compile(p.sampling.weapon, p.sampling.attribute, p.rolls);
   return task.parse({ ...input, algorithm: ALGORITHM, weapon: p.sampling.weapon, attribute: p.sampling.attribute,
@@ -133,8 +214,8 @@ export function verifySample(p: Profile, sample: number[]): Profile {
 }
 
 export function align(p: Profile, sampled: boolean): Profile {
-  if (!p.baseline || !p.gate) throw new Error('请先取得位置并确认适用条件');
-  const state = { ...p.baseline, counter: uint.parse(p.baseline.counter + (sampled ? p.rolls.length : 0)) };
+  if (!p.baseline) throw new Error('请先取得位置');
+  const state = { ...p.baseline, skill: p.state?.skill ?? null, counter: uint.parse(p.baseline.counter + (sampled ? p.rolls.length : 0)) };
   return { ...p, state, aligned: true };
 }
 

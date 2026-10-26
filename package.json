@@ -11,7 +11,7 @@
   "heybox": {
     "miniProgramId": "",
     "name": "巨戟观星",
-    "desc": "怪物猎人：荒野巨戟武器完全重抽观星助手，支持连续样本识别、种子续接、未来加成筛选和兑现进度记录。",
+    "desc": "怪物猎人：荒野巨戟武器观星助手，支持连续样本识别、种子续接、未来复原加成与技能组合筛选和兑现进度记录。",
     "category": "tool",
     "icon": "assets/heybox-placeholder.png",
     "coverImages": ["assets/heybox-placeholder.png"],

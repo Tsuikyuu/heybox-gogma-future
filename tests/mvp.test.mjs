@@ -10,6 +10,16 @@ const reference = await import('../experiments/gogma-js/core.mjs');
 const rolls = [[13, 6, 8, 12, 6], [13, 10, 12, 15, 6], [9, 15, 9, 16, 6], [12, 16, 6, 8, 9], [12, 13, 15, 6, 9], [15, 9, 6, 16, 12]];
 const setup = () => ({ ...newProfile('验证档案', 12, 3), gate: true, rolls });
 
+test('legacy gate flags do not block searching or aligning a known position', () => {
+  const p = { ...setup(), gate: false };
+  const task = makeTask(p, { seedStart: 86315169, seedEnd: 86315169, counterStart: 480, counterEnd: 480 });
+  strict.equal(task.seedStart, 86315169);
+  const state = { seed: 86315169, counter: 480, skill: null };
+  const aligned = align({ ...p, state, baseline: state }, false);
+  strict.equal(aligned.aligned, true);
+  strict.deepEqual(archiveSchema.parse({ version: 1, profiles: [aligned], active: aligned.id }).profiles[0], aligned);
+});
+
 test('legacy weapon parameters migrate into sampling metadata without binding the archive', () => {
   const legacy = { ...setup(), weapon: 12, attribute: 3 };
   delete legacy.sampling;
@@ -236,7 +246,6 @@ test('conflicting targets block acceptance; rejected candidates still advance; m
 
 test('backup and search boundaries reject incompatible versions, corrupt cursors and invalid observations', () => {
   strict.throws(() => archiveSchema.parse({ version: 2, profiles: [], active: null }));
-  strict.throws(() => makeTask({ ...setup(), gate: false }, { seedStart: 0, seedEnd: 1, counterStart: 0, counterEnd: 1 }));
   strict.throws(() => makeTask(setup(), { seedStart: 10, seedEnd: 1, counterStart: 0, counterEnd: 1 }));
   strict.throws(() => makeTask(setup(), { seedStart: 0, seedEnd: 1, counterStart: 0, counterEnd: 10000 }));
   strict.throws(() => archiveSchema.parse({ version: 1, active: null, profiles: [{ ...setup(), rolls: [[8]] }] }));

@@ -1,5 +1,5 @@
 // Adapted from GogmaSeedFinder 65789e9 (MIT), via the validated JS experiment.
-// See ../THIRD_PARTY_NOTICES.md. Reset only, with an active counter gate.
+// See ../THIRD_PARTY_NOTICES.md. Predictions require their respective active counter gates.
 export const ALGORITHM = 'gsf-65789e9-reset-v1';
 export const weapons = ['大剑', '片手剑', '双剑', '太刀', '大锤', '狩猎笛', '长枪', '铳枪', '斩斧', '盾斧', '操虫棍', '弓', '重弩', '轻弩'];
 export const attributes = ['无属性', '火', '水', '冰', '雷', '龙', '毒', '麻痹', '睡眠', '爆破'];
@@ -185,5 +185,20 @@ export function predict(seed: number, weapon: number, attribute: number, counter
     }
     for (let n = 0; n < 10; n++) step(state);
     return selected;
+  });
+}
+
+// Skill lottery order and sparse internal IDs follow rng-core at 65789e9.
+export function predictSkills(seed: number, weapon: number, attribute: number, counter: number, count: number) {
+  const state = new Uint32Array(4);
+  jump(jumpTable(counter * 10), initialize(((seed + weapon * 1000 + attribute) >>> 0) ^ 0x00ac9365), state);
+  step(state);
+  return Array.from({ length: count }, (_, offset) => {
+    if (offset > 0) for (let n = 0; n < 10; n++) step(state);
+    const tableIndex = state[3]! % 294;
+    const set = Math.floor(tableIndex / 14);
+    const group = tableIndex % 14;
+    const id = set === 0 ? [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15][group]! : 16 + (set - 1) * 15 + (group === 13 ? 14 : group);
+    return { tableIndex, set, group, id };
   });
 }

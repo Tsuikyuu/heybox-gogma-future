@@ -24,6 +24,9 @@
 }
 
 * { box-sizing: border-box; }
+.prediction-tracks { margin-bottom: 20px; }
+.skill-pair { min-width: 0; overflow-wrap: anywhere; }
+.skill-pair p { margin-bottom: 8px; }
 body { margin: 0; }
 ::selection { background: var(--primary); color: var(--primary-foreground); }
 button, input, select, textarea { font: inherit; }
@@ -188,11 +191,12 @@ nav button:active:not(:disabled) { background: var(--border); }
 .sample:first-child { padding-top: 0; }
 .sample:last-child { margin-bottom: 12px; }
 .sample > b { color: var(--muted-foreground); font: 11px/28px var(--mono); }
-.sample .chips { flex: 1; }
+.sample .chips { flex: 1; min-width: 0; }
+.sample .bonus { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .sample button { min-height: 36px; min-width: 36px; padding: 6px; border-color: transparent; background: transparent; font-size: 12px; }
 .filters-card { margin-top: 0; }
 .filters-card > summary { color: var(--foreground); font-size: 14px; }
-.filters-card .grid > label:first-child { grid-column: 1 / -1; }
+.filters-card [data-form=predict] .grid > label:first-child { grid-column: 1 / -1; }
 .requirements { min-width: 0; margin: 0; padding: 0; border: 0; }
 .requirements legend { margin-bottom: 8px; padding: 0; font-size: 12px; }
 .requirements legend .muted { margin-left: 6px; }
@@ -203,6 +207,7 @@ nav button:active:not(:disabled) { background: var(--border); }
 .route-list p { margin: 6px 0; }
 .future-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
 .future-row > .chips { grid-row: 2; grid-column: 1 / -1; }
+.future-row > .skill-pair { grid-row: 2; grid-column: 1 / -1; }
 .future-row > button { grid-row: 1; grid-column: 2; }
 .future-row h3 { font-size: 16px; margin-bottom: 5px; }
 .future-row small { font: 11px var(--mono); color: var(--muted-foreground); }
