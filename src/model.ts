@@ -13,7 +13,7 @@ const skillSession = z.object({
 }).superRefine((s, ctx) => {
   if (s.search && (s.search.end < s.search.start || s.search.end - s.search.start >= 10000 ||
     s.search.candidates.some((c) => c < s.search!.start || c > s.search!.end))) ctx.addIssue({ code: 'custom', message: '技能搜索范围无效' });
-  if (((s.verified || s.synced) && s.candidate === null) || (s.synced && !s.verified) || (s.verified && s.rolls.length < 3)) ctx.addIssue({ code: 'custom', message: '技能校准状态无效' });
+  if (((s.verified || s.synced) && s.candidate === null) || (s.verified && s.rolls.length < 3)) ctx.addIssue({ code: 'custom', message: '技能校准状态无效' });
   if (s.candidate !== null && (!s.search?.candidates.includes(s.candidate) || s.rolls.length < 2 || s.candidate + s.rolls.length > 0xffffffff ||
     !predictSkills(s.seed, s.weapon, s.attribute, s.candidate, s.rolls.length).every((r, i) => r.tableIndex === s.rolls[i]))) ctx.addIssue({ code: 'custom', message: '技能候选与样本不符' });
 });
@@ -99,17 +99,31 @@ export function setCounter(p: Profile, counter: number): Profile {
   };
 }
 
+export function setSamplingWeapon(p: Profile, input: { weapon: number; attribute: number }): Profile {
+  const sampling = z.object({ weapon, attribute }).parse(input);
+  if (sampling.weapon === p.sampling.weapon && sampling.attribute === p.sampling.attribute) return p;
+  return profileSchema.parse({ ...p, sampling, state: null, baseline: null, calibrated: false, aligned: false, targets: [], checkpoint: null });
+}
+
+export function skillPosition(p: Profile) {
+  const seed = p.state?.seed ?? p.seedHint;
+  return seed === null ? null : { seed, skill: p.state ? p.state.skill : p.skillHint };
+}
+
 export function setSkillCounter(p: Profile, counter: number): Profile {
-  if (!p.state) throw new Error('请先确定种子与位置');
-  return { ...p, state: { ...p.state, skill: uint.parse(counter) }, skillSession: null };
+  if (!skillPosition(p)) throw new Error('请先确定共同种子');
+  const skill = uint.parse(counter);
+  return { ...p, state: p.state ? { ...p.state, skill } : null, skillHint: skill, skillSession: null };
 }
 
 export function startSkillSampling(p: Profile, input: { weapon: number; attribute: number }): Profile {
-  if (!p.state) throw new Error('请先确定共同种子');
-  if (p.state.skill !== null || p.skillSession?.synced) throw new Error('技能位置已确认，新一轮采样请建立新档案');
-  if (p.skillSession?.seed === p.state.seed && p.skillSession.rolls.length) throw new Error('已有技能样本，不能重新设置采样武器');
-  return { ...p, state: { ...p.state, skill: null }, skillHint: null,
-    skillSession: skillSession.parse({ ...input, seed: p.state.seed, rolls: [], search: null, candidate: null, verified: false, synced: false }) };
+  const position = skillPosition(p);
+  if (!position) throw new Error('请先确定共同种子');
+  if (position.skill !== null || p.skillSession?.synced) throw new Error('技能位置已确认，新一轮采样请建立新档案');
+  const existing = p.skillSession?.seed === position.seed ? p.skillSession : null;
+  if (existing?.weapon === input.weapon && existing.attribute === input.attribute) return p;
+  return { ...p, skillHint: null,
+    skillSession: skillSession.parse({ ...input, seed: position.seed, rolls: existing?.rolls ?? [], search: null, candidate: null, verified: false, synced: false }) };
 }
 
 export function recordSkillSample(p: Profile, sample: number | null): Profile {
@@ -157,13 +171,13 @@ export function verifySkillSample(p: Profile, sample: number): Profile {
 
 export function alignSkillCounter(p: Profile, sampled: boolean): Profile {
   const session = requireSkillSession(p);
-  if (session.candidate === null || !session.verified || session.synced) throw new Error('请先用额外技能对核对候选');
+  if (session.candidate === null || session.synced) throw new Error('请先选择技能候选');
   const skill = uint.parse(session.candidate + (sampled ? session.rolls.length : 0));
-  return { ...p, state: { ...p.state!, skill }, skillHint: skill, skillSession: { ...session, synced: true } };
+  return { ...p, state: p.state ? { ...p.state, skill } : null, skillHint: skill, skillSession: { ...session, synced: true } };
 }
 
 function requireSkillSession(p: Profile) {
-  if (!p.state || !p.skillSession || p.skillSession.seed !== p.state.seed) throw new Error('请为当前种子建立技能采样');
+  if (!p.skillSession || p.skillSession.seed !== skillPosition(p)?.seed) throw new Error('请为当前种子建立技能采样');
   return p.skillSession;
 }
 

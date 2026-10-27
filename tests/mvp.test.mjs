@@ -4,11 +4,25 @@ import { compile, compileRequirements, createSearch, predict } from '../src/engi
 import { advance, align, archiveSchema, canUndoCount, correctLastRecord, deleteProfile, encodeCode, makeTask, newProfile, parseCode, restoreCheckpoint, saveCheckpoint, setCounter, undoCount, useCandidate, verifySample } from '../src/model.ts';
 import { runSearch, searchProgress } from '../src/search.ts';
 import { shortestRoute } from '../src/planner.ts';
+import { setSamplingWeapon } from '../src/model.ts';
 
 const reference = await import('../experiments/gogma-js/core.mjs');
 // Upstream independent Heavy Bowgun live fixture, commit 65789e9.
 const rolls = [[13, 6, 8, 12, 6], [13, 10, 12, 15, 6], [9, 15, 9, 16, 6], [12, 16, 6, 8, 9], [12, 13, 15, 6, 9], [15, 9, 6, 16, 12]];
 const setup = () => ({ ...newProfile('验证档案', 12, 3), gate: true, rolls });
+
+test('changing sampling weapon preserves observations and searches with the saved weapon and attribute', () => {
+  const p = { ...newProfile('切换采样武器'), rolls };
+  const next = setSamplingWeapon(setSamplingWeapon(p, { weapon: 12, attribute: 0 }), { weapon: 12, attribute: 3 });
+  strict.deepEqual(next.rolls, rolls);
+  const task = makeTask(next, { seedStart: 86315069, seedEnd: 86315269, counterStart: 475, counterEnd: 485 });
+  strict.equal(task.weapon, 12);
+  strict.equal(task.attribute, 3);
+  strict.deepEqual(createSearch(task.weapon, task.attribute, task.counterStart, task.counterEnd, task.rolls)(task.seedStart, task.seedEnd), [{ seed: 86315169, counter: 480 }]);
+  strict.deepEqual(archiveSchema.parse({ version: 1, profiles: [next], active: next.id }).profiles[0].sampling, { weapon: 12, attribute: 3 });
+  strict.throws(() => setSamplingWeapon(next, { weapon: 11, attribute: 0 }));
+  strict.deepEqual(next.sampling, { weapon: 12, attribute: 3 });
+});
 
 test('legacy gate flags do not block searching or aligning a known position', () => {
   const p = { ...setup(), gate: false };

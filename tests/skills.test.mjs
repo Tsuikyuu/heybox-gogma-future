@@ -67,7 +67,12 @@ test('golden skill samples locate, verify, persist and align either game positio
   strict.deepEqual(found.skillSession.search.candidates, [186]);
   strict.equal(found.state.counter, 480);
   const selected = selectSkillCandidate(found, 186);
-  strict.throws(() => alignSkillCounter(selected, true));
+  const unverified = alignSkillCounter(selected, true);
+  strict.equal(unverified.state.skill, 190);
+  strict.equal(unverified.skillSession.verified, false);
+  strict.equal(unverified.skillSession.synced, true);
+  strict.equal(alignSkillCounter(selected, false).state.skill, 186);
+  strict.deepEqual(archiveSchema.parse({ version: 1, profiles: [unverified], active: unverified.id }).profiles[0], unverified);
   strict.throws(() => verifySkillSample(selected, 0));
   strict.equal(selected.skillSession.rolls.length, 4);
   const verified = verifySkillSample(selected, 37);
@@ -97,7 +102,16 @@ test('golden skill samples locate, verify, persist and align either game positio
   strict.throws(() => editSkillObservation(continued, 0, 0));
   strict.throws(() => startSkillSampling(continued, { weapon: 0, attribute: 0 }));
   strict.throws(() => startSkillSampling({ ...setSkillCounter(p, 0), skillGate: true }, { weapon: 0, attribute: 0 }));
-  strict.throws(() => startSkillSampling(p, { weapon: 0, attribute: 0 }));
+  const changed = startSkillSampling(verified, { weapon: 0, attribute: 0 });
+  strict.deepEqual(changed.skillSession.rolls, verified.skillSession.rolls);
+  strict.equal(changed.skillSession.weapon, 0);
+  strict.equal(changed.skillSession.attribute, 0);
+  strict.equal(changed.skillSession.search, null);
+  strict.equal(changed.skillSession.candidate, null);
+  strict.equal(changed.skillSession.verified, false);
+  strict.equal(startSkillSampling(verified, { weapon: 10, attribute: 4 }), verified);
+  const restoredWeapon = startSkillSampling(changed, { weapon: 10, attribute: 4 });
+  strict.deepEqual(searchSkillCounter(restoredWeapon, 0, 9999).skillSession.search.candidates, [186]);
 });
 
 test('skill search includes endpoints, rejects invalid ranges and stale seeds', () => {
