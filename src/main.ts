@@ -118,7 +118,7 @@ function observeStateCard(p: Profile) {
   const position = skillPosition(p);
   if (!position) return `<section class="card empty"><h2>尚未确定共同种子</h2><p>请先导入种子，或通过巨戟复原加成观星识别种子。</p>${observeTrack !== 'bonus' ? button('前往复原观星', 'observe-track', 'bonus', 'primary') : ''}</section>`;
   const ready = !predictionGate(p, observeTrack);
-  return `<section class="card state-card"><h3>种子 ${position.seed}</h3><p>下一次复原位置 <b>${p.state?.counter ?? '未知'}</b> · 技能位置 <b>${position.skill ?? '未知'}</b></p>${observeTrack === 'artian' ? `<p>普通机械武器已定位 <b>${Object.keys(artianState(p).counters).length} / ${weapons.length}</b></p>` : `<p>${(observeTrack === 'skill' ? p.skillSession?.seed === position.seed && p.skillSession.verified : p.calibrated) ? '✓ 已校准' : '待额外样本校准'} · ${ready ? '位置已确认' : '位置待确认'}</p>`}${ready ? button('查看预测', 'observe-prediction', '', 'primary') : ''}</section>`;
+  return `<section class="card state-card"><h3>种子 ${position.seed}</h3><p>下一次复原位置 <b>${p.state?.counter ?? '未知'}</b> · 技能位置 <b>${position.skill ?? '未知'}</b></p>${observeTrack === 'artian' ? `<p>普通机械武器已定位 <b>${Object.keys(artianState(p).counters).length} / ${weapons.length}</b></p>` : ''}${ready ? button('查看预测', 'observe-prediction', '', 'primary') : ''}</section>`;
 }
 
 function skillObserveView(p: Profile) {
