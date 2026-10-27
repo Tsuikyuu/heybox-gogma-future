@@ -13,7 +13,7 @@ import { shortestRoute, shortestSkillRoute } from './planner';
 import { skillTableForecast } from './forecast';
 import { skillCsv } from './csv';
 import { skillGroups, skillSets } from './skills';
-import { alignSkillCounter, editSkillObservation, recordSkillSample, searchSkillCounter, selectSkillCandidate, skillPosition, startSkillSampling, verifySkillSample } from './model';
+import { alignSkillCounter, editSkillObservation, recordSkillSample, searchSkillCounter, selectSkillCandidate, setSkillCounter, skillPosition, startSkillSampling, verifySkillSample } from './model';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 let archive = emptyArchive();
@@ -166,7 +166,11 @@ function progressView(t: Task, rate = 0) {
 }
 
 function archiveManager() {
-  return `<div class="section-heading"><h2>管理存档</h2><div class="actions">${button('导出', 'export', '', 'small')}${button('返回', 'home', '', 'small')}</div></div>${archive.profiles.length ? archive.profiles.map((p) => `<section class="card archive-card"><div class="section-heading"><h3>${escape(p.name)}</h3>${archive.active === p.id ? '<span class="badge">当前存档</span>' : ''}</div>${p.state ? `<p>种子 ${p.state.seed}</p>` : ''}<form data-form="profile-edit" data-profile="${escape(p.id)}">${field('档案名称', 'name', p.name, 'text', 'required maxlength="80"')}${p.state ? number('当前计数（下一次复原位置）', 'counter', String(p.state.counter)) : '<p class="muted">尚未确定种子与位置，暂不能修改计数。</p>'}${submit('保存修改')}</form><div class="actions archive-actions">${deletingProfile === p.id ? `<span>删除此存档？</span>${button('确认删除', 'delete-profile', p.id, 'small primary')}${button('取消', 'cancel-delete-profile', '', 'small')}` : button('删除存档', 'confirm-delete-profile', p.id, 'small')}</div></section>`).join('') : '<section class="card empty"><p>暂无存档</p></section>'}`;
+  return `<div class="section-heading"><h2>管理存档</h2><div class="actions">${button('导出', 'export', '', 'small')}${button('返回', 'home', '', 'small')}</div></div>${archive.profiles.length ? archive.profiles.map((p) => {
+    const position = skillPosition(p);
+    return `<section class="card archive-card"><div class="section-heading"><h3>${escape(p.name)}</h3>${archive.active === p.id ? '<span class="badge">当前存档</span>' : ''}</div>${position ? `<p>种子 ${position.seed}</p>` : ''}
+      <form data-form="profile-edit" data-profile="${escape(p.id)}">${field('档案名称', 'name', p.name, 'text', 'required maxlength="80"')}<div class="grid">${p.state ? number('当前复原计数（下一次复原位置）', 'counter', String(p.state.counter)) : '<p class="muted">尚未确定复原位置，暂不能修改复原计数。</p>'}${position ? field('当前技能计数（下一次技能位置）', 'skill', position.skill === null ? '' : String(position.skill), 'number', `min="0" max="4294967295" step="1" ${position.skill === null ? 'placeholder="未知，可手动填写"' : 'required'}`) : '<p class="muted">尚未确定种子，暂不能修改技能计数。</p>'}</div>${submit('保存修改')}</form><div class="actions archive-actions">${deletingProfile === p.id ? `<span>删除此存档？</span>${button('确认删除', 'delete-profile', p.id, 'small primary')}${button('取消', 'cancel-delete-profile', '', 'small')}` : button('删除存档', 'confirm-delete-profile', p.id, 'small')}</div></section>`;
+  }).join('') : '<section class="card empty"><p>暂无存档</p></section>'}`;
 }
 
 function predictView(p: Profile) {
@@ -377,8 +381,13 @@ async function handleForm(form: HTMLFormElement, intent?: string) {
   if (type === 'profile-edit') {
     const profile = archive.profiles.find((item) => item.id === form.dataset.profile);
     if (!profile) throw new Error('存档不存在');
-    await update(profileSchema.parse({ ...(profile.state ? setCounter(profile, num('counter')) : profile), name: text('name') }));
+    const restored = profile.state ? setCounter(profile, num('counter')) : profile;
+    const skill = text('skill') ? num('skill') : null;
+    const next = skill !== null && skill !== skillPosition(profile)?.skill ? setSkillCounter(restored, skill) : restored;
+    await update(profileSchema.parse({ ...next, name: text('name') }));
     prediction = null;
+    skillPrediction = null;
+    editSkillSample = null;
     exportText = '';
     render();
     message('档案已更新');
