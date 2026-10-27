@@ -4,7 +4,7 @@ import { setSamplingWeapon } from './model';
 import { artianBonuses, artianPool, predictArtian } from './engine';
 import { alignArtianCounter, artianParameters, artianState, editArtianSample, recordArtianSample, searchArtianCounter, setArtianSampling } from './artian';
 import { ALGORITHM, attributes, bonuses, compile, compileRequirements, pool, predict, predictKeep, predictSkills, weapons } from './engine';
-import { advance, align, archiveSchema, deleteProfile, emptyArchive, encodeCode, makeTask, newProfile, parseCode, profileSchema, restoreCheckpoint, saveCheckpoint, setCounter, uint, undoCount, useCandidate, verifySample } from './model';
+import { advance, align, archiveSchema, deleteProfile, emptyArchive, makeTask, newProfile, parseCode, profileSchema, restoreCheckpoint, saveCheckpoint, setCounter, uint, undoCount, useCandidate, verifySample } from './model';
 import type { Archive, Position, Profile, Task } from './model';
 import { runSearch, searchProgress } from './search';
 import { openStorage, standalone } from './storage';
@@ -29,7 +29,6 @@ let editSample: number | null = null;
 let editSkillSample: number | null = null;
 let artianEdit: { profile: string; index: number } | null = null;
 let preview: Position | null = null;
-let exportText = '';
 let renderedView = '';
 let messageTimer: ReturnType<typeof setTimeout> | undefined;
 const predictionDrafts = new Map<string, { weapon: number; attribute: number }>();
@@ -166,9 +165,9 @@ function progressView(t: Task, rate = 0) {
 }
 
 function archiveManager() {
-  return `<div class="section-heading"><h2>管理存档</h2><div class="actions">${button('导出', 'export', '', 'small')}${button('返回', 'home', '', 'small')}</div></div>${archive.profiles.length ? archive.profiles.map((p) => {
+  return `<div class="section-heading"><h2>管理存档</h2>${button('返回', 'home', '', 'small')}</div>${archive.profiles.length ? archive.profiles.map((p) => {
     const position = skillPosition(p);
-    return `<section class="card archive-card"><div class="section-heading"><h3>${escape(p.name)}</h3>${archive.active === p.id ? '<span class="badge">当前存档</span>' : ''}</div>${position ? `<p>种子 ${position.seed}</p>` : ''}
+    return `<section class="card archive-card"><div class="section-heading"><h3>${escape(p.name)}</h3>${archive.active === p.id ? '<span class="badge">当前存档</span>' : ''}</div><p class="muted archive-code">GSF2-B${position?.seed ?? '?'}-G${p.state?.counter ?? '?'}-S${position?.skill ?? '?'}</p>
       <form data-form="profile-edit" data-profile="${escape(p.id)}">${field('档案名称', 'name', p.name, 'text', 'required maxlength="80"')}<div class="grid">${p.state ? number('当前复原计数（下一次复原位置）', 'counter', String(p.state.counter)) : '<p class="muted">尚未确定复原位置，暂不能修改复原计数。</p>'}${position ? field('当前技能计数（下一次技能位置）', 'skill', position.skill === null ? '' : String(position.skill), 'number', `min="0" max="4294967295" step="1" ${position.skill === null ? 'placeholder="未知，可手动填写"' : 'required'}`) : '<p class="muted">尚未确定种子，暂不能修改技能计数。</p>'}</div>${submit('保存修改')}</form><div class="actions archive-actions">${deletingProfile === p.id ? `<span>删除此存档？</span>${button('确认删除', 'delete-profile', p.id, 'small primary')}${button('取消', 'cancel-delete-profile', '', 'small')}` : button('删除存档', 'confirm-delete-profile', p.id, 'small')}</div></section>`;
   }).join('') : '<section class="card empty"><p>暂无存档</p></section>'}`;
 }
@@ -335,7 +334,7 @@ function render() {
       ['plan', '计划', '<path d="M9 5h11M9 12h11M9 19h11M2 5l1 1 2-2M2 12l1 1 2-2M2 19l1 1 2-2"/>'],
     ].map(([id, label, paths]) => button(`<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg><span>${label}</span>`, 'tab', id, tab === id ? 'active' : '')).join('')}</nav>` : ''}
     <div class="view view-${view}${key !== renderedView ? ' enter' : ''}${view === 'predict' && prediction ? ' has-results' : ''}">${entry || !p ? entryView() : tab === 'observe' ? observe(p) : tab === 'predict' ? predictView(p) : tab === 'table' ? tableView(p) : planView(p)}</div>
-    ${exportText ? `<section class="card"><h3>导出与备份</h3><p>选择文本并复制保存。续接码只包含种子和位置，完整备份还包含样本、目标和任务。</p>${p?.state ? `<p>当前工具位置：<code>${encodeCode(p.state)}</code> ${p.aligned ? '' : '（待核对）'}</p>` : ''}${p?.checkpoint ? `<p>已确认游戏保存点：<code>${encodeCode(p.checkpoint.position)}</code></p>` : '<p>暂无已确认游戏保存点，请不要将当前工具位置当作已保存的游戏状态。</p>'}<label>完整备份<textarea readonly rows="6">${escape(exportText)}</textarea></label>${button('收起', 'export-close')}</section>` : ''}</div>
+    </div>
     </div>`;
   mountSelectors(app);
   if (p?.tasks.at(-1)) progressView(p.tasks.at(-1)!);
@@ -388,7 +387,6 @@ async function handleForm(form: HTMLFormElement, intent?: string) {
     prediction = null;
     skillPrediction = null;
     editSkillSample = null;
-    exportText = '';
     render();
     message('档案已更新');
     return;
@@ -419,7 +417,6 @@ async function handleForm(form: HTMLFormElement, intent?: string) {
     try {
       await update(setArtianSampling(p, num('weapon'), num('attribute')));
       artianPrediction = null;
-      exportText = '';
     } finally {
       render();
       drafts.forEach((draft) => {
@@ -502,14 +499,12 @@ async function handleForm(form: HTMLFormElement, intent?: string) {
     await update(startSkillSampling(p, { weapon: num('weapon'), attribute: num('attribute') }));
     editSkillSample = null;
     skillPrediction = null;
-    exportText = '';
   }
   if (type === 'skill-sampling-change') {
     const drafts = [...app.querySelectorAll<HTMLInputElement | HTMLSelectElement>('form[data-form="skill-sample"] [name], form[data-form="skill-search"] [name]')].map((input) => ({ form: input.form!.dataset.form!, name: input.name, value: input.value }));
     try {
       await update(startSkillSampling(p, { weapon: num('weapon'), attribute: num('attribute') }));
       skillPrediction = null;
-      exportText = '';
     } finally {
       render();
       drafts.forEach((draft) => {
@@ -533,7 +528,6 @@ async function handleForm(form: HTMLFormElement, intent?: string) {
     if (!data.has('aligned')) throw new Error('请确认游戏实际位置');
     await update(alignSkillCounter(p, z.enum(['baseline', 'sampled']).parse(text('mode')) === 'sampled'));
     skillPrediction = null;
-    exportText = '';
   }
   if (type === 'skill-predict') {
     const position = skillPosition(p);
@@ -554,7 +548,6 @@ async function handleForm(form: HTMLFormElement, intent?: string) {
     try {
       await update(setSamplingWeapon(p, { weapon: num('weapon'), attribute: num('attribute') }));
       prediction = null;
-      exportText = '';
     } finally {
       // Also restore saved selections on validation/write failure, so visible and searched parameters agree.
       render();
@@ -668,9 +661,9 @@ async function handleAction(action: string, value: string) {
   if (action === 'artian-edit-cancel') artianEdit = null;
   if (action === 'artian-page' && artianPrediction) artianPrediction.page = Math.max(0, Math.min(artianPrediction.page + Number(value), Math.max(0, Math.ceil(artianPrediction.rows.length / 30) - 1)));
   if (action === 'home') { entry = ''; tab = 'observe'; }
-  if (action === 'about' && entry !== 'about') { aboutReturn = entry; entry = 'about'; exportText = ''; }
+  if (action === 'about' && entry !== 'about') { aboutReturn = entry; entry = 'about'; }
   if (action === 'about-back') entry = aboutReturn;
-  if (action === 'entry') { entry = value; preview = null; exportText = ''; }
+  if (action === 'entry') { entry = value; preview = null; }
   if (action === 'tab') { tab = value; entry = ''; }
   if (action === 'bonus-observe') { tab = 'observe'; observeTrack = 'bonus'; entry = ''; }
   if (action === 'skill-table-page' && skillTablePrediction) {
@@ -690,17 +683,15 @@ async function handleAction(action: string, value: string) {
   if (p && action === 'skill-delete-sample') { await update(recordSkillSample(p, null)); editSkillSample = null; }
   if (p && action === 'skill-candidate') { await update(selectSkillCandidate(p, uint.parse(Number(value)))); editSkillSample = null; }
   if (action === 'skill-page' && skillPrediction) skillPrediction.page = Math.max(0, Math.min(skillPrediction.page + Number(value), Math.ceil(skillPrediction.rows.length / 30) - 1));
-  if (action === 'export') exportText = JSON.stringify(archive, null, 2);
   if (action === 'confirm-delete-profile') deletingProfile = value;
   if (action === 'cancel-delete-profile') deletingProfile = '';
   if (action === 'delete-profile') {
     await commit(deleteProfile(archive, value));
     predictionDrafts.delete(value);
     logPages.delete(value);
-    deletingProfile = ''; prediction = null; preview = null; editSample = null; editSkillSample = null; exportText = '';
+    deletingProfile = ''; prediction = null; preview = null; editSample = null; editSkillSample = null;
     if (!archive.profiles.length) entry = 'new';
   }
-  if (action === 'export-close') exportText = '';
   if (action === 'edit') editSample = Number(value);
   if (action === 'edit-cancel') editSample = null;
   if (p && action === 'delete-sample') {
@@ -795,7 +786,7 @@ app.addEventListener('change', (event) => {
   }
   if (!(event.target instanceof HTMLSelectElement) || event.target.id !== 'profile-select') return;
   const id = event.target.value;
-  void perform(async () => { await commit({ ...archive, active: id }); entry = ''; prediction = null; editSample = null; editSkillSample = null; exportText = ''; render(); });
+  void perform(async () => { await commit({ ...archive, active: id }); entry = ''; prediction = null; editSample = null; editSkillSample = null; render(); });
 });
 app.addEventListener('focusin', (event) => {
   if (event.target instanceof HTMLTextAreaElement || (event.target instanceof HTMLInputElement && event.target.type !== 'checkbox')) {

@@ -202,6 +202,7 @@ nav button:active:not(:disabled) { background: var(--border); }
 .skill-table-vertical .skill-table-set, .skill-table-vertical .skill-table-group { padding: 8px 6px; }
 .archive-card .section-heading { margin-bottom: 8px; }
 .archive-card h3 { margin: 0; overflow-wrap: anywhere; }
+.archive-code { font-size: 12px; overflow-wrap: anywhere; user-select: text; }
 .archive-actions { margin-top: 12px; }
 .archive-actions > span { font-size: 12px; }
 .badge { display: inline-flex; align-items: center; padding: 5px 10px; border: 1px solid var(--border); border-radius: 5px; color: var(--muted-foreground); font-size: 11px; white-space: nowrap; }
