@@ -1,6 +1,6 @@
 # Third-party notices
 
-`src/engine.ts` and `src/skills.ts` are adapted from the Reset and skill implementations of
+`src/engine.ts` and `src/skills.ts` are adapted from the Reset, Keep and skill implementations of
 [GogmaSeedFinder](https://github.com/apeshinzo78/GogmaSeedFinder), commit
 `65789e9aa17e434a7f5d74d18ab1f9e1365920eb`, via this repository's validated
 `experiments/gogma-js` prototype. Its MIT license is retained at
@@ -14,3 +14,7 @@ restrictions. No game images or GARP source files are included here.
 
 `tests/skills.test.mjs` retains the 40 skill lottery indices from the upstream
 `tests/fixtures/skill_stream_v0.9.3.json` formula vectors at the same commit.
+
+`tests/keep.test.mjs` retains the six Keep results from
+`crates/rng-core/src/lib.rs` (`keep_rolls_preserve_each_slot_category_and_match_the_upstream_formula`)
+at the same commit.

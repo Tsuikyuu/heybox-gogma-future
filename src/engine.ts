@@ -170,6 +170,19 @@ export function createSearch(weapon: number, attribute: number, counterStart: nu
 }
 
 export function predict(seed: number, weapon: number, attribute: number, counter: number, count: number) {
+  return predictBonuses(seed, weapon, attribute, counter, count);
+}
+
+// Keep preserves the ordered categories, not the current tiers (GogmaSeedFinder rng-core).
+export function predictKeep(seed: number, weapon: number, attribute: number, counter: number, count: number, layout: number[]) {
+  const available = pool(weapon, attribute);
+  if (layout.length !== 5 || layout.some((category) => !Number.isInteger(category) || !available.some((b) => b.category === category))) throw new Error('请按从左到右顺序填写武器当前五槽的有效类别');
+  if (layout.filter((category) => category === 2).length > 4) throw new Error('属性加成最多四槽');
+  if (layout.filter((category) => category === 3).length > 2) throw new Error('斩味／装填加成最多两槽');
+  return predictBonuses(seed, weapon, attribute, counter, count, layout);
+}
+
+function predictBonuses(seed: number, weapon: number, attribute: number, counter: number, count: number, layout?: number[]) {
   const state = new Uint32Array(4);
   jump(jumpTable(counter * 10), initialize(((seed + weapon * 1000 + attribute) >>> 0) ^ 0x00ac9365), state);
   const candidates = pool(weapon, attribute).map((b) => b.id);
@@ -178,7 +191,7 @@ export function predict(seed: number, weapon: number, attribute: number, counter
     local.set(state);
     const selected: number[] = [];
     for (let slot = 0; slot < 5; slot++) {
-      const weights = candidates.map((id) => weight(id, selected));
+      const weights = candidates.map((id) => layout && categories[id] !== layout[slot] ? 0 : weight(id, selected));
       let value = step(local) % weights.reduce((a, b) => a + b, 0);
       const index = weights.findIndex((amount) => { value -= amount; return value < 0; });
       selected.push(candidates[index]!);
