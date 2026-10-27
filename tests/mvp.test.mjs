@@ -101,7 +101,7 @@ test('saved demands migrate old archives and survive backup round trips', () => 
   delete old.demands;
   strict.deepEqual(archiveSchema.parse({ version: 1, active: old.id, profiles: [old] }).profiles[0].demands, []);
   const p = { ...setup(), demands: [{ id: 'a', name: '冰属性重弩', weapon: 12, attribute: 3, requirements: [8, 8, 0, 0, 0], achieved: false }] };
-  strict.deepEqual(archiveSchema.parse(JSON.parse(JSON.stringify({ version: 1, active: p.id, profiles: [p] }))).profiles[0].demands, p.demands);
+  strict.deepEqual(archiveSchema.parse(JSON.parse(JSON.stringify({ version: 1, active: p.id, profiles: [p] }))).profiles[0].demands, p.demands.map((d) => ({ ...d, bonusEnabled: true, skills: null })));
   strict.throws(() => archiveSchema.parse({ version: 1, active: p.id, profiles: [{ ...p, demands: [{ ...p.demands[0], requirements: [999, 0, 0, 0, 0] }] }] }));
 });
 

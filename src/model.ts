@@ -19,7 +19,12 @@ const skillSession = z.object({
     !predictSkills(s.seed, s.weapon, s.attribute, s.candidate, s.rolls.length).every((r, i) => r.tableIndex === s.rolls[i]))) ctx.addIssue({ code: 'custom', message: '技能候选与样本不符' });
 });
 const target = z.object({ id: z.string(), name: z.string().min(1).max(80), weapon, attribute, counter: uint, roll, demandId: z.string().optional() });
-const demand = z.object({ id: z.string(), name: z.string().min(1).max(80), weapon, attribute, requirements: z.array(uint).length(5), achieved: z.boolean().default(false) });
+const demand = z.object({
+  id: z.string(), name: z.string().min(1).max(80), weapon, attribute,
+  requirements: z.array(uint).length(5), bonusEnabled: z.boolean().default(true),
+  skills: z.object({ set: uint.max(20).nullable(), group: uint.max(13).nullable() }).nullable().default(null),
+  achieved: z.boolean().default(false),
+}).refine((d) => d.bonusEnabled || d.skills !== null, '请至少设置复原加成或技能组合需求');
 const task = z.object({
   algorithm: z.literal(ALGORITHM), weapon, attribute,
   rolls: z.array(roll).min(1).max(100),
@@ -53,7 +58,8 @@ export const profileSchema = z.object({
   baseline: position.nullable(),
   checkpoint: z.object({ position, at: z.string(), achieved: z.array(z.string()).default([]) }).nullable(),
   targets: z.array(target).max(200),
-  demands: z.array(demand).max(20).default([]),
+  demands: z.array(demand).default([]),
+  planRange: uint.min(1).max(10000).default(10000),
   logs: z.array(z.object({ at: z.string(), text: z.string(), before: uint, after: uint, demandId: z.string().optional(), kind: z.enum(['padding', 'accepted', 'rejected', 'mismatch']).optional() })).max(2000),
   tasks: z.array(task).max(20),
 }).transform(({ weapon, attribute, ...profile }) => ({
