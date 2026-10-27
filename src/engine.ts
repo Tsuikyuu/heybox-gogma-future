@@ -173,6 +173,38 @@ export function predict(seed: number, weapon: number, attribute: number, counter
   return predictBonuses(seed, weapon, attribute, counter, count);
 }
 
+// R8 ordinary Artian: rarity enum 7 replaces attribute in the derived seed.
+// IDs, equal-weight draws and per-category caps follow web/artian-base-rng.js.
+export const artianBonuses = [
+  { id: 4, name: '基础攻击力强化', cap: 5, category: 0 },
+  { id: 6, name: '属性强化', cap: 4, category: 2 },
+  { id: 7, name: '斩味／装填数强化', cap: 2, category: 3 },
+  { id: 8, name: '会心率强化', cap: 3, category: 1 },
+];
+
+export function artianPool(weapon: number, attribute: number) {
+  return artianBonuses.filter((b) => !(weapon === 11 && b.id === 7) && !((weapon >= 12 || attribute === 0) && b.id === 6));
+}
+
+export function predictArtian(seed: number, weapon: number, attribute: number, counter: number, count: number) {
+  const state = new Uint32Array(4);
+  jump(jumpTable(counter * 10), initialize(((seed + weapon * 1000 + 7) >>> 0) ^ 0x00ac9365), state);
+  const local = new Uint32Array(4);
+  return Array.from({ length: count }, () => {
+    local.set(state);
+    const available = artianPool(weapon, attribute).map((b) => ({ ...b, used: 0 }));
+    const roll = Array.from({ length: 5 }, () => {
+      const index = step(local) % available.length;
+      const bonus = available[index]!;
+      bonus.used++;
+      if (bonus.used === bonus.cap) available.splice(index, 1);
+      return bonus.id;
+    });
+    for (let n = 0; n < 10; n++) step(state);
+    return roll;
+  });
+}
+
 // Keep preserves the ordered categories, not the current tiers (GogmaSeedFinder rng-core).
 export function predictKeep(seed: number, weapon: number, attribute: number, counter: number, count: number, layout: number[]) {
   const available = pool(weapon, attribute);

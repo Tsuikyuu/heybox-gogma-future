@@ -18,3 +18,9 @@ restrictions. No game images or GARP source files are included here.
 `tests/keep.test.mjs` retains the six Keep results from
 `crates/rng-core/src/lib.rs` (`keep_rolls_preserve_each_slot_category_and_match_the_upstream_formula`)
 at the same commit.
+
+The ordinary R8 Artian implementation in `src/engine.ts` and counter search in
+`src/artian.ts` follow `web/artian-base-rng.js` at the same commit.
+`tests/artian.test.mjs` retains selected observations from
+`tests/fixtures/artian_base_lance_live_2026-10-11.json` and
+`tests/fixtures/artian_base_multitype_live_2026-10-11.json`.

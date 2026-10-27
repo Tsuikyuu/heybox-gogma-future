@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { artianSchema } from './artian';
 import { ALGORITHM, compile, compileRequirements, predict, predictSkills } from './engine';
 
 export const uint = z.number().int().min(0).max(0xffffffff);
@@ -48,6 +49,7 @@ export const profileSchema = z.object({
   calibrated: z.boolean(), aligned: z.boolean(), gate: z.boolean().default(false),
   skillGate: z.boolean().default(false),
   skillSession: skillSession.nullable().default(null),
+  artian: artianSchema.nullable().default(null),
   baseline: position.nullable(),
   checkpoint: z.object({ position, at: z.string(), achieved: z.array(z.string()).default([]) }).nullable(),
   targets: z.array(target).max(200),
