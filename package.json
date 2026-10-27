@@ -16,7 +16,14 @@
     "icon": "assets/heybox-placeholder.png",
     "coverImages": ["assets/heybox-placeholder.png"],
     "platforms": ["android", "ios", "ohos"],
-    "permissions": { "storage": { "enabled": true } }
+    "permissions": {
+      "storage": {
+        "enabled": true
+      },
+      "filesystem": {
+        "enabled": true
+      }
+    }
   },
   "scripts": {
     "hb-sdk": "hb-sdk",
@@ -30,6 +37,7 @@
   },
   "dependencies": {
     "@heybox/hb-sdk": "^0.9.3",
+    "exceljs": "^4.4.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
